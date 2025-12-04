@@ -15,7 +15,7 @@ from flask import Flask
 from threading import Thread
 
 # ------------------ CONFIG ------------------
-TELEGRAM_BOT_TOKEN = "8264707362:AAEEColPPbu3HpuB_huGY0jOVRd4I92x3jc"
+TELEGRAM_BOT_TOKEN = "8264707362:AAEPkdKtF4k5JnGSKf0ZXW_abh2r9ZtSyU4"
 ADMIN_ID = 5398441328
 
 SYMBOLS = [
