@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Dojo.Trade — Spot Trading</title>
+  <script src="https://accounts.google.com/gsi/client" async></script>
+  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    :root {
+      --bg: #0f0f13;
+      --panel: #14141a;
+      --sidebar: #1a1a22;
+      --text: #e0e0e0;
+      --text-muted: #aaa;
+      --border: #2a2a35;
+      --up: #10b981;
+      --down: #ef4444;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    .screen {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+    }
+    .login-box {
+      background: var(--panel);
+      padding: 32px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      text-align: center;
+      max-width: 400px;
+      width: 90%;
+    }
+    .login-box h2 {
+      margin-bottom: 24px;
+      color: #4ade80;
+    }
+    input[type="text"], input[type="number"] {
+      width: 100%;
+      padding: 10px;
+      margin: 8px 0;
+      border-radius: 6px;
+      border: 1px solid #333;
+      background: #1e1e28;
+      color: white;
+    }
+    .btn {
+      padding: 10px;
+      width: 100%;
+      border: none;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 12px;
+      font-size: 15px;
+    }
+    .btn-buy { background: var(--up); color: white; }
+    .btn-sell { background: var(--down); color: white; }
+    #chart-screen {
+      display: none;
+    }
+    .header {
+      padding: 12px 16px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .container {
+      display: flex;
+      height: calc(100vh - 56px);
+      overflow: hidden;
+    }
+    .sidebar {
+      width: 200px;
+      background: var(--sidebar);
+      padding: 12px 8px;
+      overflow-y: auto;
+    }
+    @media (max-width: 768px) {
+      .sidebar { width: 100px; }
+      .pair span { display: none; }
+      .pair::before { content: attr(data-base); }
+    }
+    .pair {
+      padding: 10px 12px;
+      cursor: pointer;
+      border-radius: 6px;
+      margin: 2px 0;
+      font-size: 14px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .pair:hover { background: #252530; }
+    .pair.active { background: #1e293b; color: var(--up); }
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    #chart {
+      flex: 1;
+      background: #121218;
+    }
+    .trade-panel {
+      height: 180px;
+      padding: 16px;
+      background: var(--panel);
+      border-top: 1px solid var(--border);
+    }
+    .balance {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div id="login-screen" class="screen">
+    <div class="login-box">
+      <h2>Welcome to Dojo.Trade</h2>
+      <div id="g_id_onload"
+          data-client_id="REPLACE_WITH_YOUR_GOOGLE_CLIENT_ID"
+          data-callback="handleCredentialResponse">
+      </div>
+      <div class="g_id_signin"
+          data-type="standard"
+          data-size="large"
+          data-theme="outline"
+          data-text="sign_in_with"
+          data-shape="rectangular"
+          data-logo_alignment="left">
+      </div>
+    </div>
+  </div>
+
+  <div id="promo-screen" class="screen">
+    <div class="login-box">
+      <h2>Enter Promo Code</h2>
+      <p style="color:var(--text-muted); margin-bottom:16px;">Get your trading balance!</p>
+      <input type="text" id="promo-input" placeholder="e.g. WELCOME">
+      <button onclick="applyPromo()" class="btn btn-buy">Apply Code</button>
+      <p id="promo-message" style="margin-top:12px; min-height:20px; color:var(--text-muted);"></p>
+    </div>
+  </div>
+
+  <div id="chart-screen">
+    <div class="header">
+      <div class="logo">Dojo.Trade</div>
+      <div class="user-info" id="user-info">Loading...</div>
+    </div>
+    <div class="container">
+      <div class="sidebar" id="pairs-list">
+        <h3>USDT Pairs</h3>
+      </div>
+      <div class="main">
+        <div id="chart"></div>
+        <div class="trade-panel">
+          <div class="balance">Balance: <span id="balance">0 USDT</span></div>
+          <input type="number" id="amount" value="100" min="1" step="10" placeholder="Amount (USDT)">
+          <button class="btn btn-buy" onclick="buy()">BUY</button>
+          <button class="btn btn-sell" onclick="sell()">SELL</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const GOOGLE_CLIENT_ID = "REPLACE_WITH_YOUR_GOOGLE_CLIENT_ID";
+    let authToken = null;
+    const API_BASE = window.location.origin; // Ավտոմատ
+
+    function handleCredentialResponse(response) {
+      fetch(`${API_BASE}/api/auth/google`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({token: response.credential})
+      })
+      .then(r => r.json())
+      .then(data => {
+        authToken = data.access_token;
+        document.getElementById('login-screen').style.display = 'none';
+        if (data.user.has_balance) {
+          showTradingScreen(data.user);
+        } else {
+          document.getElementById('promo-screen').style.display = 'flex';
+        }
+      })
+      .catch(err => {
+        alert('Login failed');
+        console.error(err);
+      });
+    }
+
+    function showTradingScreen(user) {
+      document.getElementById('promo-screen').style.display = 'none';
+      document.getElementById('chart-screen').style.display = 'block';
+      document.getElementById('user-info').textContent = `Hi, ${user.name}`;
+      document.getElementById('balance').textContent = user.balance_usdt.toFixed(2) + ' USDT';
+      loadPairs();
+      loadChartData();
+    }
+
+    async function applyPromo() {
+      const code = document.getElementById('promo-input').value.trim();
+      if (!code) return;
+      const msgEl = document.getElementById('promo-message');
+      msgEl.textContent = 'Checking...';
+      try {
+        const res = await fetch(`${API_BASE}/api/promo/apply`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify({code: code})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          msgEl.style.color = '#10b981';
+          msgEl.textContent = data.message;
+          setTimeout(() => {
+            fetch(`${API_BASE}/api/account`, {
+              headers: { 'Authorization': `Bearer ${authToken}` }
+            }).then(r => r.json()).then(acc => {
+              showTradingScreen({name: document.getElementById('user-info').textContent.replace('Hi, ', ''), balance_usdt: acc.balance.USDT});
+            });
+          }, 1500);
+        } else {
+          msgEl.style.color = '#ef4444';
+          msgEl.textContent = data.detail || 'Invalid code';
+        }
+      } catch (e) {
+        msgEl.textContent = 'Network error';
+      }
+    }
+
+    let currentSymbol = 'BTCUSDT';
+    const chart = LightweightCharts.createChart(document.getElementById('chart'), {
+      layout: { backgroundColor: '#121218', textColor: '#d1d4dc' },
+      grid: { vertLines: { color: '#1a1a25' }, horzLines: { color: '#1a1a25' } },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      priceScale: { borderColor: '#333' },
+      timeScale: { borderColor: '#333', timeVisible: true, secondsVisible: false }
+    });
+    const candleSeries = chart.addCandlestickSeries({
+      upColor: '#10b981',
+      downColor: '#ef4444',
+      borderVisible: false,
+      wickUpColor: '#10b981',
+      wickDownColor: '#ef4444',
+    });
+
+    async function loadPairs() {
+      const res = await fetch(`${API_BASE}/api/symbols`);
+      const pairs = await res.json();
+      const list = document.getElementById('pairs-list');
+      list.innerHTML = '<h3>USDT Pairs</h3>';
+      pairs.slice(0, 50).forEach(pair => {
+        const base = pair.replace('USDT', '');
+        const el = document.createElement('div');
+        el.className = 'pair';
+        el.setAttribute('data-base', base);
+        el.innerHTML = `<span>${base}</span>/USDT`;
+        if (pair === currentSymbol) el.classList.add('active');
+        el.onclick = () => {
+          document.querySelectorAll('.pair').forEach(p => p.classList.remove('active'));
+          el.classList.add('active');
+          currentSymbol = pair;
+          loadChartData();
+        };
+        list.appendChild(el);
+      });
+    }
+
+    async function loadChartData() {
+      const url = `https://api.binance.com/api/v3/klines?symbol=${currentSymbol}&interval=1m&limit=100`;
+      const res = await fetch(url);
+      const data = await res.json();
+      const formatted = data.map(d => ({
+        time: d[0] / 1000,
+        open: parseFloat(d[1]),
+        high: parseFloat(d[2]),
+        low: parseFloat(d[3]),
+        close: parseFloat(d[4])
+      }));
+      candleSeries.setData(formatted);
+      chart.timeScale().fitContent();
+    }
+
+    async function updateBalance() {
+      const res = await fetch(`${API_BASE}/api/account`, {
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      });
+      const acc = await res.json();
+      document.getElementById('balance').textContent = acc.balance.USDT.toFixed(2) + ' USDT';
+    }
+
+    async function buy() {
+      const amount = parseFloat(document.getElementById('amount').value) || 0;
+      if (amount <= 0) return alert('Enter valid amount');
+      try {
+        const res = await fetch(`${API_BASE}/api/buy`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify({symbol: currentSymbol, usdt_amount: amount})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          updateBalance();
+          alert(data.message);
+        } else {
+          alert('Error: ' + (data.detail || 'Unknown'));
+        }
+      } catch (e) {
+        alert('Network error');
+      }
+    }
+
+    async function sell() {
+      const usdtAmount = parseFloat(document.getElementById('amount').value) || 0;
+      if (usdtAmount <= 0) return alert('Enter valid amount');
+      try {
+        const priceRes = await fetch(`${API_BASE}/api/price/${currentSymbol}`);
+        const {price} = await priceRes.json();
+        const qty = usdtAmount / price;
+        const res = await fetch(`${API_BASE}/api/sell`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+          },
+          body: JSON.stringify({symbol: currentSymbol, qty: qty})
+        });
+        const data = await res.json();
+        if (res.ok) {
+          updateBalance();
+          alert(data.message);
+        } else {
+          alert('Error: ' + (data.detail || 'Unknown'));
+        }
+      } catch (e) {
+        alert('Network error');
+      }
+    }
+
+    window.addEventListener('resize', () => {
+      if (document.getElementById('chart-screen').style.display !== 'none') {
+        chart.applyOptions({ width: document.querySelector('.main').clientWidth });
+      }
+    });
+  </script>
+</body>
+</html>
