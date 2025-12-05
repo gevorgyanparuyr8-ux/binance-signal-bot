@@ -48,7 +48,7 @@ def get_current_user(request: Request):
         raise HTTPException(status_code=401, detail="Invalid token")
 
 @app.post("/api/auth/google")
-async def google_auth(data: GoogleToken):
+async def google_auth( GoogleToken):
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"https://oauth2.googleapis.com/tokeninfo?id_token={data.token}")
         if resp.status_code != 200:
